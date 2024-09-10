@@ -4,11 +4,13 @@ const path = require('path');
 const mongoose = require('mongoose');
 const ejsMate = require('ejs-mate');
 // ejs-mate helps it easier to have templates for HTML content. Define layouts.
-const { campgroundSchema } = require('./schemas.js');
+const { campgroundSchema, reviewSchema} = require('./schemas.js');
 const catchAsync = require('./utils/catchAsync');
 const ExpressError = require('./utils/ExpressError');
 const Campground = require('./models/campground');
 const methodOverride = require('method-override');
+const Review = require('./models/review');
+const review = require('./models/review');
 
 mongoose.connect('mongodb://127.0.0.1:27017/yelp-camp');
 
@@ -36,9 +38,20 @@ const validateCampground = (req, res, next) => {
     console.log(result);
 }
 
+const validateReview = (req, res, next) => {
+    const {error} = reviewSchema.validate(req.body);
+    if(error){
+        const msg = error.details.map(el => el.message).join(',')
+        throw new ExpressError(msg, 400);
+    }else{
+        next();
+    }
+}
+
 app.get('/', (req, res) => {
     res.render('home');
 });
+
 
 app.get('/campgrounds', catchAsync(async(req, res, next) => {
         const campgrounds = await Campground.find({});
@@ -58,8 +71,12 @@ app.post('/campgrounds', validateCampground, catchAsync(async(req, res, next) =>
         res.redirect(`/campgrounds/${campground._id}`);
 }));
 
+//Using .populate()
+// When you query for a Campground, the reviews field will contain only the ObjectIds of the Review documents. To get the actual review details, you use .populate():
+
 app.get('/campgrounds/:id', catchAsync(async(req, res, next) => {
-        const campground = await Campground.findById(req.params.id);
+        const campground = await Campground.findById(req.params.id).populate('reviews');
+        console.log(campground);
         res.render('campgrounds/show', { campground });
 }));
 
@@ -88,6 +105,28 @@ app.delete('/campgrounds/:id', catchAsync(async (req, res, next) => {
         await Campground.findByIdAndDelete(id);
         res.redirect('/campgrounds');
 }));
+
+//for Reviews
+app.post('/campgrounds/:id/reviews', validateReview, catchAsync(async(req, res) => {
+    const campground = await Campground.findById(req.params.id);
+    console.log(`Campground is ${campground._id}`);
+    const review = new Review(req.body.review);
+
+    campground.reviews.push(review);
+    await review.save();
+    await campground.save();
+    res.redirect(`/campgrounds/${campground._id}`);
+}))
+
+app.delete('/campgrounds/:id/reviews/:reviewId', catchAsync(async (req, res) => {
+    const{id, reviewId} = req.params;
+    //the pull removes the reiewID from the reviews array
+    await Campground.findByIdAndUpdate(id, {$pull: {reviews: reviewId }});
+    await Review.findByIdAndDelete(reviewId);
+    res.redirect(`/campgrounds/${id}`);
+}));
+
+
 
 //if a route doesn't exist do 404
 app.all('*', (req, res, next) => {
